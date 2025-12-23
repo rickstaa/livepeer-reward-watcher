@@ -118,6 +118,7 @@ func main() {
 	repeatFlag := flag.Bool("repeat", true, "Repeat warning every check-interval (true) or only send once per round (false)")
 	disableSuccessAlertsFlag := flag.Bool("disable-success-alerts", false, "Disable alerts when rewards are successfully called (default: false)")
 	disableRoundAlertsFlag := flag.Bool("disable-round-alerts", false, "Disable alerts when new rounds start (default: false)")
+	enableRPCAlertsFlag := flag.Bool("enable-rpc-alerts", false, "Enable alerts for RPC disconnects/reconnects and subscription errors (default: false)")
 	maxRetryTimeFlag := flag.Duration("max-retry-time", 30*time.Minute, "Max time to retry RPC connections before giving up (0 = retry forever)")
 	flag.Parse()
 	args := flag.Args()
@@ -222,7 +223,9 @@ func main() {
 			sentInitialMonitoringAlert = true
 		} else {
 			recoveryMsg := fmt.Sprintf("✅ RPC connection restored to %s, resuming monitoring.", maskRPCURL(usedRPC))
-			sendAlert(botToken, chatID, discordWebhook, recoveryMsg, 0x00FF00)
+			if *enableRPCAlertsFlag {
+				sendAlert(botToken, chatID, discordWebhook, recoveryMsg, 0x00FF00)
+			}
 		}
 		ticker := time.NewTicker(*checkIntervalFlag)
 	monitorLoop:
@@ -230,11 +233,15 @@ func main() {
 			select {
 			case err := <-rewardSub.Err():
 				log.Printf("Reward subscription error: %v", err)
-				sendAlert(botToken, chatID, discordWebhook, fmt.Sprintf("⚠️ Reward subscription error: %v", err), 0xFF0000)
+				if *enableRPCAlertsFlag {
+					sendAlert(botToken, chatID, discordWebhook, fmt.Sprintf("⚠️ Reward subscription error: %v", err), 0xFF0000)
+				}
 				break monitorLoop
 			case err := <-roundSub.Err():
 				log.Printf("NewRound subscription error: %v", err)
-				sendAlert(botToken, chatID, discordWebhook, fmt.Sprintf("⚠️ NewRound subscription error: %v", err), 0xFF0000)
+				if *enableRPCAlertsFlag {
+					sendAlert(botToken, chatID, discordWebhook, fmt.Sprintf("⚠️ NewRound subscription error: %v", err), 0xFF0000)
+				}
 				break monitorLoop
 			case vLog := <-rewardCh:
 				// Reward called for this round.
