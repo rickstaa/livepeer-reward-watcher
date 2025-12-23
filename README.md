@@ -87,6 +87,7 @@ go run main.go --delay=2h --check-interval=1h <orchestrator-address> [rpc1 rpc2 
 - `--repeat` - Repeat warning every check-interval (default: true). Set to false to only warn once per round
 - `--disable-success-alerts` - Disable alerts when rewards are successfully called (default: false)
 - `--disable-round-alerts` - Disable alerts when new rounds start (default: false)
+- `--enable-rpc-alerts` - Enable alerts for RPC disconnects/reconnects and subscription errors (default: false)
 - `--max-retry-time` - Max time to retry RPC connections before giving up (default: 30m, 0 = retry forever)
 
 ### Usage Examples
