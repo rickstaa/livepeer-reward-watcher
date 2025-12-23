@@ -29,18 +29,15 @@ var bondingManager = common.HexToAddress("0x35Bcf3c30594191d53231E4FF333E8A77045
 // RoundsManager contract: https://arbiscan.io/address/0xdd6f56DcC28D3F5f27084381fE8Df634985cc39f
 var roundsManager = common.HexToAddress("0xdd6f56DcC28D3F5f27084381fE8Df634985cc39f")
 
-// maskRPCURL returns the scheme://host/path of the RPC URL, omitting userinfo, port, and query.
+// maskRPCURL returns a safe display form of the RPC URL, omitting secrets.
 func maskRPCURL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "(invalid url)"
 	}
 
-	// Only show scheme://host/path (omit userinfo, port, query, fragment).
+	// Only show scheme://host (omit userinfo, port, path, query, fragment).
 	masked := u.Scheme + "://" + u.Hostname()
-	if u.Path != "" {
-		masked += u.Path
-	}
 	return masked
 }
 
