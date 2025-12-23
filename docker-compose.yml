@@ -6,10 +6,16 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      EMAIL_FROM: ${EMAIL_FROM}
+      EMAIL_TO: ${EMAIL_TO}
     command:
       [
         "--delay=2h",
         "--check-interval=1h",
         "<orchestrator-address>",
-        "wss://arb1.arbitrum.io/ws",
+        "${RPC_1}",
       ]

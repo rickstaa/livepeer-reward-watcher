@@ -12,7 +12,7 @@ This Go script monitors the Livepeer protocol on Arbitrum and notifies you if yo
 - **Also sends alerts for (enabled by default, can be disabled):**
   - Successful reward calls (`--disable-success-alerts`)
   - New round notifications (`--disable-round-alerts`)
-- Supports both Telegram and Discord notifications
+- Supports Telegram, Discord, and SMTP email notifications
 - Automatic RPC failover with configurable retry limits
 - Both the delay and repeat interval for alerts are fully configurable via command-line flags.
 
@@ -22,6 +22,7 @@ This Go script monitors the Livepeer protocol on Arbitrum and notifies you if yo
 - A working Ethereum WebSocket RPC endpoint (e.g., `wss://arb1.arbitrum.io/ws`).
 - Telegram bot token and chat ID (required for Telegram alerts).
 - Discord webhook URL (required for Discord alerts).
+- SMTP credentials (required for email alerts).
 
 ## Alert Setup Instructions
 
@@ -50,6 +51,17 @@ More info: [Telegram Bot API docs](https://core.telegram.org/bots#botfather)
 
 More info: [Discord Webhooks Guide](https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks)
 
+### Email (SMTP) Setup
+
+Provide SMTP credentials and a recipient via environment variables:
+
+- `SMTP_HOST` (e.g. `smtp.mailgun.org`)
+- `SMTP_PORT` (optional, defaults to `587`)
+- `SMTP_USER`
+- `SMTP_PASS`
+- `EMAIL_FROM` (e.g. `alerts@yourdomain.com`)
+- `EMAIL_TO` (comma-separated list of recipients)
+
 ## Usage
 
 ### Building
@@ -76,6 +88,12 @@ Run the script directly on your machine:
 export TELEGRAM_BOT_TOKEN=your_bot_token
 export TELEGRAM_CHAT_ID=your_chat_id
 export DISCORD_WEBHOOK_URL=your_webhook_url
+export SMTP_HOST=smtp.mailgun.org
+export SMTP_PORT=587
+export SMTP_USER=postmaster@yourdomain.com
+export SMTP_PASS=your_smtp_password
+export EMAIL_FROM=alerts@yourdomain.com
+export EMAIL_TO=you@example.com,ops@example.com
 
 go run main.go --delay=2h --check-interval=1h <orchestrator-address> [rpc1 rpc2 ...]
 ```
