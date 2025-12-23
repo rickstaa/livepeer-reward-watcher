@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"html"
 	"log"
+	"net"
 	"net/http"
+	"net/smtp"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -77,8 +81,42 @@ func sendDiscordAlert(webhookURL, message string, color int) error {
 	return nil
 }
 
+type EmailConfig struct {
+	Host     string
+	Port     string
+	Username string
+	Password string
+	From     string
+	To       []string
+}
+
+func (c EmailConfig) complete() bool {
+	return c.Host != "" && c.From != "" && len(c.To) > 0 && c.Username != "" && c.Password != ""
+}
+
+// sendEmailAlert sends an HTML email using SMTP.
+func sendEmailAlert(cfg EmailConfig, subject, htmlBody string) error {
+	if !cfg.complete() {
+		return fmt.Errorf("email config is incomplete")
+	}
+	auth := smtp.Auth(nil)
+	if cfg.Username != "" {
+		auth = smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
+	}
+	addr := net.JoinHostPort(cfg.Host, cfg.Port)
+	headers := []string{
+		fmt.Sprintf("From: %s", cfg.From),
+		fmt.Sprintf("To: %s", strings.Join(cfg.To, ", ")),
+		fmt.Sprintf("Subject: %s", subject),
+		"MIME-Version: 1.0",
+		"Content-Type: text/html; charset=UTF-8",
+	}
+	body := strings.Join(headers, "\r\n") + "\r\n\r\n" + htmlBody + "\r\n"
+	return smtp.SendMail(addr, auth, cfg.From, cfg.To, []byte(body))
+}
+
 // sendAlert sends alerts to messaging platforms based on configuration.
-func sendAlert(botToken, chatID, discordWebhook, message string, color int) error {
+func sendAlert(botToken, chatID, discordWebhook string, emailCfg EmailConfig, message string, color int) error {
 	var failed []string
 	if discordWebhook != "" {
 		if err := sendDiscordAlert(discordWebhook, message, color); err != nil {
@@ -92,10 +130,49 @@ func sendAlert(botToken, chatID, discordWebhook, message string, color int) erro
 			failed = append(failed, "Telegram")
 		}
 	}
+	if emailCfg.complete() {
+		htmlBody := markdownToHTML(strings.TrimSpace(message))
+		if err := sendEmailAlert(emailCfg, "Livepeer Reward Watcher Alert", htmlBody); err != nil {
+			log.Printf("Email alert error: %v", err)
+			failed = append(failed, "Email")
+		}
+	}
 	if len(failed) > 0 {
 		return fmt.Errorf("alert failed for: %s", strings.Join(failed, ", "))
 	}
 	return nil
+}
+
+var markdownLinkRe = regexp.MustCompile(`\[(.*?)\]\((.*?)\)`)
+
+// markdownToHTML converts a markdown-formatted message to HTML.
+func markdownToHTML(message string) string {
+	body := html.EscapeString(message)
+	body = markdownLinkRe.ReplaceAllStringFunc(body, func(match string) string {
+		parts := markdownLinkRe.FindStringSubmatch(match)
+		if len(parts) != 3 {
+			return match
+		}
+		return fmt.Sprintf(`<a href="%s">%s</a>`, parts[2], parts[1])
+	})
+	body = strings.ReplaceAll(body, "\n", "<br>")
+	return "<html><body><p>" + body + "</p></body></html>"
+}
+
+// splitCSV splits a comma-separated string into a slice of trimmed strings.
+func splitCSV(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 // sendTelegramAlert sends a message to a Telegram chat using a bot.
@@ -135,8 +212,19 @@ func main() {
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	chatID := os.Getenv("TELEGRAM_CHAT_ID")
 	discordWebhook := os.Getenv("DISCORD_WEBHOOK_URL")
-	if discordWebhook == "" && (botToken == "" || chatID == "") {
-		log.Fatal("Either DISCORD_WEBHOOK_URL or both TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set in the environment")
+	emailCfg := EmailConfig{
+		Host:     os.Getenv("SMTP_HOST"),
+		Port:     os.Getenv("SMTP_PORT"),
+		Username: os.Getenv("SMTP_USER"),
+		Password: os.Getenv("SMTP_PASS"),
+		From:     os.Getenv("EMAIL_FROM"),
+		To:       splitCSV(os.Getenv("EMAIL_TO")),
+	}
+	if emailCfg.Host != "" && emailCfg.Port == "" {
+		emailCfg.Port = "587"
+	}
+	if discordWebhook == "" && (botToken == "" || chatID == "") && !emailCfg.complete() {
+		log.Fatal("Set DISCORD_WEBHOOK_URL, or both TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID, or email SMTP settings")
 	}
 
 	// Main RPC failover loop.
@@ -150,7 +238,7 @@ func main() {
 		// Stop if max retry time exceeded.
 		if *maxRetryTimeFlag > 0 && time.Since(retryStartTime) > *maxRetryTimeFlag {
 			fatalMsg := fmt.Sprintf("❌ Failed to connect to any RPC after %v, giving up and shutting down reward watcher!", *maxRetryTimeFlag)
-			sendAlert(botToken, chatID, discordWebhook, fatalMsg, 0xFF0000)
+			sendAlert(botToken, chatID, discordWebhook, emailCfg, fatalMsg, 0xFF0000)
 			log.Fatalf("%s", fatalMsg)
 		}
 
@@ -219,12 +307,12 @@ func main() {
 			monitoringMsg := fmt.Sprintf(
 				"🟢 Livepeer Reward watcher monitoring orchestrator [%s](https://explorer.livepeer.org/accounts/%s/delegating) on Arbitrum.",
 				orch.Hex(), strings.ToLower(orch.Hex()))
-			sendAlert(botToken, chatID, discordWebhook, monitoringMsg, 0x00FF00)
+			sendAlert(botToken, chatID, discordWebhook, emailCfg, monitoringMsg, 0x00FF00)
 			sentInitialMonitoringAlert = true
 		} else {
 			recoveryMsg := fmt.Sprintf("✅ RPC connection restored to %s, resuming monitoring.", maskRPCURL(usedRPC))
 			if *enableRPCAlertsFlag {
-				sendAlert(botToken, chatID, discordWebhook, recoveryMsg, 0x00FF00)
+				sendAlert(botToken, chatID, discordWebhook, emailCfg, recoveryMsg, 0x00FF00)
 			}
 		}
 		ticker := time.NewTicker(*checkIntervalFlag)
@@ -234,13 +322,13 @@ func main() {
 			case err := <-rewardSub.Err():
 				log.Printf("Reward subscription error: %v", err)
 				if *enableRPCAlertsFlag {
-					sendAlert(botToken, chatID, discordWebhook, fmt.Sprintf("⚠️ Reward subscription error: %v", err), 0xFF0000)
+					sendAlert(botToken, chatID, discordWebhook, emailCfg, fmt.Sprintf("⚠️ Reward subscription error: %v", err), 0xFF0000)
 				}
 				break monitorLoop
 			case err := <-roundSub.Err():
 				log.Printf("NewRound subscription error: %v", err)
 				if *enableRPCAlertsFlag {
-					sendAlert(botToken, chatID, discordWebhook, fmt.Sprintf("⚠️ NewRound subscription error: %v", err), 0xFF0000)
+					sendAlert(botToken, chatID, discordWebhook, emailCfg, fmt.Sprintf("⚠️ NewRound subscription error: %v", err), 0xFF0000)
 				}
 				break monitorLoop
 			case vLog := <-rewardCh:
@@ -253,7 +341,7 @@ func main() {
 					address, address, currentRound, vLog.BlockNumber, txHash, txHash)
 				log.Println(alertMsg)
 				if !*disableSuccessAlertsFlag {
-					sendAlert(botToken, chatID, discordWebhook, alertMsg, 0x00FF00)
+					sendAlert(botToken, chatID, discordWebhook, emailCfg, alertMsg, 0x00FF00)
 				}
 			case vLog := <-roundCh:
 				// New round started.
@@ -268,7 +356,7 @@ func main() {
 				log.Printf("New round %d started", currentRound)
 				if !*disableRoundAlertsFlag {
 					newRoundMsg := fmt.Sprintf("🔄 New round %d started.", currentRound)
-					sendAlert(botToken, chatID, discordWebhook, newRoundMsg, 0x0099FF)
+					sendAlert(botToken, chatID, discordWebhook, emailCfg, newRoundMsg, 0x0099FF)
 				}
 			case <-ticker.C:
 				if !rewardCalled && !roundStart.IsZero() {
@@ -280,7 +368,7 @@ func main() {
 								"❌ No reward called for [%s](https://explorer.livepeer.org/accounts/%s/delegating) in round %d after %s.",
 								address, address, currentRound, delayFlag.String())
 							log.Println(alertMsg)
-							sendAlert(botToken, chatID, discordWebhook, alertMsg, 0xFF0000)
+							sendAlert(botToken, chatID, discordWebhook, emailCfg, alertMsg, 0xFF0000)
 							sentWarning = true
 						}
 					}
